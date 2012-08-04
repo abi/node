@@ -24,6 +24,8 @@
 #include "task.h"
 #include "uv.h"
 
+static uv_loop_t* loop;
+
 static int N = 1000;
 static int done;
 
@@ -85,7 +87,7 @@ void pipe_close_cb(uv_handle_t* pipe) {
 
 
 void on_read(uv_stream_t* pipe, ssize_t nread, uv_buf_t buf) {
-  uv_err_t err = uv_last_error();
+  uv_err_t err = uv_last_error(loop);
 
   if (nread > 0) {
     ASSERT(pipe_open == 1);
@@ -99,6 +101,7 @@ void on_read(uv_stream_t* pipe, ssize_t nread, uv_buf_t buf) {
 
 
 static void spawn() {
+  uv_stdio_container_t stdio[2];
   int r;
 
   ASSERT(process_open == 0);
@@ -111,10 +114,15 @@ static void spawn() {
   options.args = args;
   options.exit_cb = exit_cb;
 
-  uv_pipe_init(&out);
-  options.stdout_stream = &out;
+  uv_pipe_init(loop, &out, 0);
 
-  r = uv_spawn(&process, options);
+  options.stdio = stdio;
+  options.stdio_count = 2;
+  options.stdio[0].flags = UV_IGNORE;
+  options.stdio[1].flags = UV_CREATE_PIPE | UV_WRITABLE_PIPE;
+  options.stdio[1].data.stream = (uv_stream_t*)&out;
+
+  r = uv_spawn(loop, &process, options);
   ASSERT(r == 0);
 
   process_open = 1;
@@ -130,22 +138,22 @@ BENCHMARK_IMPL(spawn) {
   int r;
   static int64_t start_time, end_time;
 
-  uv_init();
+  loop = uv_default_loop();
 
   r = uv_exepath(exepath, &exepath_size);
   ASSERT(r == 0);
   exepath[exepath_size] = '\0';
 
-  uv_update_time();
-  start_time = uv_now();
+  uv_update_time(loop);
+  start_time = uv_now(loop);
 
   spawn();
 
-  r = uv_run();
+  r = uv_run(loop);
   ASSERT(r == 0);
 
-  uv_update_time();
-  end_time = uv_now();
+  uv_update_time(loop);
+  end_time = uv_now(loop);
 
   LOGF("spawn: %.0f spawns/s\n",
        (double) N / (double) (end_time - start_time) * 1000.0);

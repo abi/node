@@ -1,4 +1,4 @@
-# Copyright 2010 the V8 project authors. All rights reserved.
+# Copyright 2012 the V8 project authors. All rights reserved.
 # Redistribution and use in source and binary forms, with or without
 # modification, are permitted provided that the following conditions are
 # met:
@@ -26,6 +26,7 @@
 # OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 {
+  'includes': ['../build/common.gypi'],
   'variables': {
     'console%': '',
   },
@@ -36,11 +37,9 @@
       'dependencies': [
         '../tools/gyp/v8.gyp:v8',
       ],
+      # Generated source files need this explicitly:
       'include_dirs+': [
         '../src',
-      ],
-      'defines': [
-        'ENABLE_DEBUGGER_SUPPORT',
       ],
       'sources': [
         'd8.cc',
@@ -62,8 +61,8 @@
               'libraries': [ '-lreadline', ],
               'sources': [ 'd8-readline.cc' ],
             }],
-            [ '(OS=="linux" or OS=="mac" or OS=="freebsd" \
-              or OS=="openbsd" or OS=="solaris")', {
+            ['(OS=="linux" or OS=="mac" or OS=="freebsd" or OS=="netbsd" \
+               or OS=="openbsd" or OS=="solaris" or OS=="android")', {
               'sources': [ 'd8-posix.cc', ]
             }],
             [ 'OS=="win"', {

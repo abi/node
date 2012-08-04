@@ -23,6 +23,8 @@
 
 #include "uv.h"
 #include "internal.h"
+#include "handle-inl.h"
+#include "req-inl.h"
 
 
 /* Atomic set operation on char */
@@ -54,44 +56,48 @@ static inline char uv_atomic_exchange_set(char volatile* target) {
 #endif
 
 
-void uv_async_endgame(uv_async_t* handle) {
+void uv_async_endgame(uv_loop_t* loop, uv_async_t* handle) {
   if (handle->flags & UV_HANDLE_CLOSING &&
       !handle->async_sent) {
     assert(!(handle->flags & UV_HANDLE_CLOSED));
-    handle->flags |= UV_HANDLE_CLOSED;
-
-    if (handle->close_cb) {
-      handle->close_cb((uv_handle_t*)handle);
-    }
-
-    uv_unref();
+    uv__handle_stop(handle);
+    uv__handle_close(handle);
   }
 }
 
 
-int uv_async_init(uv_async_t* handle, uv_async_cb async_cb) {
+int uv_async_init(uv_loop_t* loop, uv_async_t* handle, uv_async_cb async_cb) {
   uv_req_t* req;
 
-  uv_counters()->handle_init++;
-  uv_counters()->async_init++;
-
-  handle->type = UV_ASYNC;
-  handle->flags = 0;
+  uv__handle_init(loop, (uv_handle_t*) handle, UV_ASYNC);
   handle->async_sent = 0;
   handle->async_cb = async_cb;
 
   req = &handle->async_req;
-  uv_req_init(req);
+  uv_req_init(loop, req);
   req->type = UV_WAKEUP;
   req->data = handle;
 
-  uv_ref();
+  loop->counters.async_init++;
+
+  uv__handle_start(handle);
 
   return 0;
 }
 
 
+void uv_async_close(uv_loop_t* loop, uv_async_t* handle) {
+  if (!((uv_async_t*)handle)->async_sent) {
+    uv_want_endgame(loop, (uv_handle_t*) handle);
+  }
+
+  uv__handle_start(handle);
+}
+
+
 int uv_async_send(uv_async_t* handle) {
+  uv_loop_t* loop = handle->loop;
+
   if (handle->type != UV_ASYNC) {
     /* Can't set errno because that's not thread-safe. */
     return -1;
@@ -102,22 +108,23 @@ int uv_async_send(uv_async_t* handle) {
   assert(!(handle->flags & UV_HANDLE_CLOSING));
 
   if (!uv_atomic_exchange_set(&handle->async_sent)) {
-    POST_COMPLETION_FOR_REQ(&handle->async_req);
+    POST_COMPLETION_FOR_REQ(loop, &handle->async_req);
   }
 
   return 0;
 }
 
 
-void uv_process_async_wakeup_req(uv_async_t* handle, uv_req_t* req) {
+void uv_process_async_wakeup_req(uv_loop_t* loop, uv_async_t* handle,
+    uv_req_t* req) {
   assert(handle->type == UV_ASYNC);
   assert(req->type == UV_WAKEUP);
 
   handle->async_sent = 0;
-  if (handle->async_cb) {
+
+  if (!(handle->flags & UV_HANDLE_CLOSING)) {
     handle->async_cb((uv_async_t*) handle, 0);
-  }
-  if (handle->flags & UV_HANDLE_CLOSING) {
-    uv_want_endgame((uv_handle_t*)handle);
+  } else {
+    uv_want_endgame(loop, (uv_handle_t*)handle);
   }
 }

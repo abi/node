@@ -29,8 +29,6 @@
 #include <bzlib.h>
 #endif
 #include <signal.h>
-#include <string>
-#include <map>
 
 #include "v8.h"
 
@@ -86,16 +84,6 @@ class CounterCollection {
 };
 
 
-// We statically allocate a set of local counters to be used if we
-// don't want to store the stats in a memory-mapped file
-static CounterCollection local_counters;
-
-
-typedef std::map<std::string, int*> CounterMap;
-typedef std::map<std::string, int*>::iterator CounterMapIterator;
-static CounterMap counter_table_;
-
-
 class Compressor {
  public:
   virtual ~Compressor() {}
@@ -121,7 +109,7 @@ class PartialSnapshotSink : public i::SnapshotByteSink {
       if (j != 0) {
         fprintf(fp, ",");
       }
-      fprintf(fp, "%d", at(j));
+      fprintf(fp, "%u", static_cast<unsigned char>(at(j)));
     }
   }
   char at(int i) { return data_[i]; }
@@ -315,7 +303,11 @@ int main(int argc, char** argv) {
 #endif
   i::Serializer::Enable();
   Persistent<Context> context = v8::Context::New();
-  ASSERT(!context.IsEmpty());
+  if (context.IsEmpty()) {
+    fprintf(stderr,
+            "\nException thrown while compiling natives - see above.\n\n");
+    exit(1);
+  }
   // Make sure all builtin scripts are cached.
   { HandleScope scope;
     for (int i = 0; i < i::Natives::GetBuiltinsCount(); i++) {
@@ -324,7 +316,7 @@ int main(int argc, char** argv) {
   }
   // If we don't do this then we end up with a stray root pointing at the
   // context even after we have disposed of the context.
-  HEAP->CollectAllGarbage(true);
+  HEAP->CollectAllGarbage(i::Heap::kNoGCFlags, "mksnapshot");
   i::Object* raw_context = *(v8::Utils::OpenHandle(*context));
   context.Dispose();
   CppByteSink sink(argv[1]);

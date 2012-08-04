@@ -1,4 +1,4 @@
-// Copyright 2011 the V8 project authors. All rights reserved.
+// Copyright 2012 the V8 project authors. All rights reserved.
 // Redistribution and use in source and binary forms, with or without
 // modification, are permitted provided that the following conditions are
 // met:
@@ -67,17 +67,20 @@ static bool run_shell;
 int main(int argc, char* argv[]) {
   v8::V8::SetFlagsFromCommandLine(&argc, argv, true);
   run_shell = (argc == 1);
-  v8::HandleScope handle_scope;
-  v8::Persistent<v8::Context> context = CreateShellContext();
-  if (context.IsEmpty()) {
-    printf("Error creating context\n");
-    return 1;
+  int result;
+  {
+    v8::HandleScope handle_scope;
+    v8::Persistent<v8::Context> context = CreateShellContext();
+    if (context.IsEmpty()) {
+      printf("Error creating context\n");
+      return 1;
+    }
+    context->Enter();
+    result = RunMain(argc, argv);
+    if (run_shell) RunShell(context);
+    context->Exit();
+    context.Dispose();
   }
-  context->Enter();
-  int result = RunMain(argc, argv);
-  if (run_shell) RunShell(context);
-  context->Exit();
-  context.Dispose();
   v8::V8::Dispose();
   return result;
 }
@@ -250,16 +253,14 @@ void RunShell(v8::Handle<v8::Context> context) {
   static const int kBufferSize = 256;
   // Enter the execution environment before evaluating any code.
   v8::Context::Scope context_scope(context);
+  v8::Local<v8::String> name(v8::String::New("(shell)"));
   while (true) {
     char buffer[kBufferSize];
     printf("> ");
     char* str = fgets(buffer, kBufferSize, stdin);
     if (str == NULL) break;
     v8::HandleScope handle_scope;
-    ExecuteString(v8::String::New(str),
-                  v8::String::New("(shell)"),
-                  true,
-                  true);
+    ExecuteString(v8::String::New(str), name, true, true);
   }
   printf("\n");
 }

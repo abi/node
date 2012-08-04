@@ -142,6 +142,7 @@ class JoinableThread {
   }
 
   virtual void Run() = 0;
+
  private:
   class ThreadWithSemaphore : public i::Thread {
    public:
@@ -203,7 +204,11 @@ static void StartJoinAndDeleteThreads(const i::List<JoinableThread*>& threads) {
 
 // Run many threads all locking on the same isolate
 TEST(IsolateLockingStress) {
+#ifdef V8_TARGET_ARCH_MIPS
+  const int kNThreads = 50;
+#else
   const int kNThreads = 100;
+#endif
   i::List<JoinableThread*> threads(kNThreads);
   v8::Isolate* isolate = v8::Isolate::New();
   for (int i = 0; i < kNThreads; i++) {
@@ -236,7 +241,7 @@ class IsolateNonlockingThread : public JoinableThread {
 
 // Run many threads each accessing its own isolate without locking
 TEST(MultithreadedParallelIsolates) {
-#ifdef V8_TARGET_ARCH_ARM
+#if defined(V8_TARGET_ARCH_ARM) || defined(V8_TARGET_ARCH_MIPS)
   const int kNThreads = 10;
 #else
   const int kNThreads = 50;
@@ -274,7 +279,11 @@ class IsolateNestedLockingThread : public JoinableThread {
 
 // Run  many threads with nested locks
 TEST(IsolateNestedLocking) {
+#ifdef V8_TARGET_ARCH_MIPS
+  const int kNThreads = 50;
+#else
   const int kNThreads = 100;
+#endif
   v8::Isolate* isolate = v8::Isolate::New();
   i::List<JoinableThread*> threads(kNThreads);
   for (int i = 0; i < kNThreads; i++) {
@@ -310,7 +319,7 @@ class SeparateIsolatesLocksNonexclusiveThread : public JoinableThread {
 
 // Run parallel threads that lock and access different isolates in parallel
 TEST(SeparateIsolatesLocksNonexclusive) {
-#ifdef V8_TARGET_ARCH_ARM
+#if defined(V8_TARGET_ARCH_ARM) || defined(V8_TARGET_ARCH_MIPS)
   const int kNThreads = 50;
 #else
   const int kNThreads = 100;
@@ -377,13 +386,14 @@ class LockerUnlockerThread : public JoinableThread {
       CalcFibAndCheck();
     }
   }
+
  private:
   v8::Isolate* isolate_;
 };
 
 // Use unlocker inside of a Locker, multiple threads.
 TEST(LockerUnlocker) {
-#ifdef V8_TARGET_ARCH_ARM
+#if defined(V8_TARGET_ARCH_ARM) || defined(V8_TARGET_ARCH_MIPS)
   const int kNThreads = 50;
 #else
   const int kNThreads = 100;
@@ -429,13 +439,14 @@ class LockTwiceAndUnlockThread : public JoinableThread {
       CalcFibAndCheck();
     }
   }
+
  private:
   v8::Isolate* isolate_;
 };
 
 // Use Unlocker inside two Lockers.
 TEST(LockTwiceAndUnlock) {
-#ifdef V8_TARGET_ARCH_ARM
+#if defined(V8_TARGET_ARCH_ARM) || defined(V8_TARGET_ARCH_MIPS)
   const int kNThreads = 50;
 #else
   const int kNThreads = 100;
@@ -498,6 +509,7 @@ class LockAndUnlockDifferentIsolatesThread : public JoinableThread {
       thread.Join();
     }
   }
+
  private:
   v8::Isolate* isolate1_;
   v8::Isolate* isolate2_;
@@ -555,7 +567,11 @@ class LockUnlockLockThread : public JoinableThread {
 
 // Locker inside an Unlocker inside a Locker.
 TEST(LockUnlockLockMultithreaded) {
+#ifdef V8_TARGET_ARCH_MIPS
+  const int kNThreads = 50;
+#else
   const int kNThreads = 100;
+#endif
   v8::Isolate* isolate = v8::Isolate::New();
   Persistent<v8::Context> context;
   {
@@ -602,7 +618,11 @@ class LockUnlockLockDefaultIsolateThread : public JoinableThread {
 
 // Locker inside an Unlocker inside a Locker for default isolate.
 TEST(LockUnlockLockDefaultIsolateMultithreaded) {
+#ifdef V8_TARGET_ARCH_MIPS
+  const int kNThreads = 50;
+#else
   const int kNThreads = 100;
+#endif
   Persistent<v8::Context> context;
   {
     v8::Locker locker_;
@@ -634,4 +654,69 @@ TEST(Regress1433) {
     }
     isolate->Dispose();
   }
+}
+
+
+static const char* kSimpleExtensionSource =
+  "(function Foo() {"
+  "  return 4;"
+  "})() ";
+
+class IsolateGenesisThread : public JoinableThread {
+ public:
+  IsolateGenesisThread(int count, const char* extension_names[])
+    : JoinableThread("IsolateGenesisThread"),
+      count_(count),
+      extension_names_(extension_names)
+  {}
+
+  virtual void Run() {
+    v8::Isolate* isolate = v8::Isolate::New();
+    {
+      v8::Isolate::Scope isolate_scope(isolate);
+      CHECK(!i::Isolate::Current()->has_installed_extensions());
+      v8::ExtensionConfiguration extensions(count_, extension_names_);
+      v8::Persistent<v8::Context> context = v8::Context::New(&extensions);
+      CHECK(i::Isolate::Current()->has_installed_extensions());
+      context.Dispose();
+    }
+    isolate->Dispose();
+  }
+ private:
+  int count_;
+  const char** extension_names_;
+};
+
+// Test installing extensions in separate isolates concurrently.
+// http://code.google.com/p/v8/issues/detail?id=1821
+TEST(ExtensionsRegistration) {
+#if defined(V8_TARGET_ARCH_ARM) || defined(V8_TARGET_ARCH_MIPS)
+  const int kNThreads = 10;
+#else
+  const int kNThreads = 40;
+#endif
+  v8::RegisterExtension(new v8::Extension("test0",
+                                          kSimpleExtensionSource));
+  v8::RegisterExtension(new v8::Extension("test1",
+                                          kSimpleExtensionSource));
+  v8::RegisterExtension(new v8::Extension("test2",
+                                          kSimpleExtensionSource));
+  v8::RegisterExtension(new v8::Extension("test3",
+                                          kSimpleExtensionSource));
+  v8::RegisterExtension(new v8::Extension("test4",
+                                          kSimpleExtensionSource));
+  v8::RegisterExtension(new v8::Extension("test5",
+                                          kSimpleExtensionSource));
+  v8::RegisterExtension(new v8::Extension("test6",
+                                          kSimpleExtensionSource));
+  v8::RegisterExtension(new v8::Extension("test7",
+                                          kSimpleExtensionSource));
+  const char* extension_names[] = { "test0", "test1",
+                                    "test2", "test3", "test4",
+                                    "test5", "test6", "test7" };
+  i::List<JoinableThread*> threads(kNThreads);
+  for (int i = 0; i < kNThreads; i++) {
+    threads.Add(new IsolateGenesisThread(8, extension_names));
+  }
+  StartJoinAndDeleteThreads(threads);
 }

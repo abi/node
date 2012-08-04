@@ -58,7 +58,7 @@
  *   being started by a check_1 watcher. It verifies that a watcher is
  *   implicitly stopped when closed, and that a watcher can close itself
  *   safely.
- * - There is a repeating timer. It does not keep te event loop alive
+ * - There is a repeating timer. It does not keep the event loop alive
  *   (ev_unref) but makes sure that the loop keeps polling the system for
  *   events.
  */
@@ -106,14 +106,10 @@ static int idle_2_close_cb_called = 0;
 static int idle_2_cb_started = 0;
 static int idle_2_is_active = 0;
 
-static int timer_cb_called = 0;
-
 
 static void timer_cb(uv_timer_t* handle, int status) {
   ASSERT(handle == &timer_handle);
   ASSERT(status == 0);
-
-  timer_cb_called++;
 }
 
 
@@ -152,8 +148,8 @@ static void idle_1_cb(uv_idle_t* handle, int status) {
   ASSERT(idles_1_active > 0);
 
   /* Init idle_2 and make it active */
-  if (!idle_2_is_active) {
-    r = uv_idle_init(&idle_2_handle);
+  if (!idle_2_is_active && !uv_is_closing((uv_handle_t*)&idle_2_handle)) {
+    r = uv_idle_init(uv_default_loop(), &idle_2_handle);
     ASSERT(r == 0);
     r = uv_idle_start(&idle_2_handle, idle_2_cb);
     ASSERT(r == 0);
@@ -212,11 +208,6 @@ static void check_cb(uv_check_t* handle, int status) {
   ASSERT(handle == &check_handle);
   ASSERT(status == 0);
 
-  /* XXX
-  ASSERT(idles_1_active == 0);
-  ASSERT(idle_2_is_active == 0);
-  */
-
   if (loop_iteration < ITERATIONS) {
     /* Make some idle watchers active */
     for (i = 0; i < 1 + (loop_iteration % IDLE_COUNT); i++) {
@@ -254,9 +245,6 @@ static void prepare_2_cb(uv_prepare_t* handle, int status) {
   ASSERT(handle == &prepare_2_handle);
   ASSERT(status == 0);
 
-  /* XXX ASSERT(idles_1_active == 0); */
-  /* XXX ASSERT(idle_2_is_active == 0); */
-
   /* prepare_2 gets started by prepare_1 when (loop_iteration % 2 == 0), */
   /* and it stops itself immediately. A started watcher is not queued */
   /* until the next round, so when this callback is made */
@@ -278,11 +266,6 @@ static void prepare_1_cb(uv_prepare_t* handle, int status) {
   ASSERT(handle == &prepare_1_handle);
   ASSERT(status == 0);
 
-  /* XXX
-  ASSERT(idles_1_active == 0);
-  ASSERT(idle_2_is_active == 0);
-  */
-
   if (loop_iteration % 2 == 0) {
     r = uv_prepare_start(&prepare_2_handle, prepare_2_cb);
     ASSERT(r == 0);
@@ -299,25 +282,23 @@ TEST_IMPL(loop_handles) {
   int i;
   int r;
 
-  uv_init();
-
-  r = uv_prepare_init(&prepare_1_handle);
+  r = uv_prepare_init(uv_default_loop(), &prepare_1_handle);
   ASSERT(r == 0);
   r = uv_prepare_start(&prepare_1_handle, prepare_1_cb);
   ASSERT(r == 0);
 
-  r = uv_check_init(&check_handle);
+  r = uv_check_init(uv_default_loop(), &check_handle);
   ASSERT(r == 0);
   r = uv_check_start(&check_handle, check_cb);
   ASSERT(r == 0);
 
   /* initialize only, prepare_2 is started by prepare_1_cb */
-  r = uv_prepare_init(&prepare_2_handle);
+  r = uv_prepare_init(uv_default_loop(), &prepare_2_handle);
   ASSERT(r == 0);
 
   for (i = 0; i < IDLE_COUNT; i++) {
     /* initialize only, idle_1 handles are started by check_cb */
-    r = uv_idle_init(&idle_1_handles[i]);
+    r = uv_idle_init(uv_default_loop(), &idle_1_handles[i]);
     ASSERT(r == 0);
   }
 
@@ -325,13 +306,13 @@ TEST_IMPL(loop_handles) {
 
   /* the timer callback is there to keep the event loop polling */
   /* unref it as it is not supposed to keep the loop alive */
-  r = uv_timer_init(&timer_handle);
+  r = uv_timer_init(uv_default_loop(), &timer_handle);
   ASSERT(r == 0);
   r = uv_timer_start(&timer_handle, timer_cb, TIMEOUT, TIMEOUT);
   ASSERT(r == 0);
-  uv_unref();
+  uv_unref((uv_handle_t*)&timer_handle);
 
-  r = uv_run();
+  r = uv_run(uv_default_loop());
   ASSERT(r == 0);
 
   ASSERT(loop_iteration == ITERATIONS);
@@ -346,16 +327,10 @@ TEST_IMPL(loop_handles) {
   ASSERT(check_close_cb_called == 1);
 
   /* idle_1_cb should be called a lot */
-  /* XXX ASSERT(idle_1_cb_called >= ITERATIONS * IDLE_COUNT * 2); */
   ASSERT(idle_1_close_cb_called == IDLE_COUNT);
-  /* XXX ASSERT(idles_1_active == 0); */
 
-  /* XXX ASSERT(idle_2_cb_started >= ITERATIONS); */
-  /* XXX ASSERT(idle_2_cb_called == idle_2_cb_started); */
   ASSERT(idle_2_close_cb_called == idle_2_cb_started);
   ASSERT(idle_2_is_active == 0);
-
-  ASSERT(timer_cb_called > 0);
 
   return 0;
 }

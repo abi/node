@@ -25,23 +25,15 @@
 #include "uv.h"
 #include "internal.h"
 #include "tree.h"
-
-#undef NANOSEC
-#define NANOSEC 1000000000
+#include "handle-inl.h"
 
 
-/* The resolution of the high-resolution clock. */
-static int64_t uv_ticks_per_msec_ = 0;
-static uint64_t uv_hrtime_frequency_ = 0;
-static char uv_hrtime_initialized_ = 0;
-
-
-void uv_update_time() {
+void uv_update_time(uv_loop_t* loop) {
   DWORD ticks = GetTickCount();
 
   /* The assumption is made that LARGE_INTEGER.QuadPart has the same type */
-  /* LOOP->time, which happens to be. Is there any way to assert this? */
-  LARGE_INTEGER* time = (LARGE_INTEGER*) &LOOP->time;
+  /* loop->time, which happens to be. Is there any way to assert this? */
+  LARGE_INTEGER* time = (LARGE_INTEGER*) &loop->time;
 
   /* If the timer has wrapped, add 1 to it's high-order dword. */
   /* uv_poll must make sure that the timer can never overflow more than */
@@ -53,45 +45,8 @@ void uv_update_time() {
 }
 
 
-int64_t uv_now() {
-  return LOOP->time;
-}
-
-
-uint64_t uv_hrtime(void) {
-  LARGE_INTEGER counter;
-
-  /* When called for the first time, obtain the high-resolution clock */
-  /* frequency. */
-  if (!uv_hrtime_initialized_) {
-    uv_hrtime_initialized_ = 1;
-
-    if (!QueryPerformanceFrequency(&counter)) {
-      uv_hrtime_frequency_ = 0;
-      uv_set_sys_error(GetLastError());
-      return 0;
-    }
-
-    uv_hrtime_frequency_ = counter.QuadPart;
-  }
-
-  /* If the performance frequency is zero, there's no support. */
-  if (!uv_hrtime_frequency_) {
-    uv_set_sys_error(ERROR_NOT_SUPPORTED);
-    return 0;
-  }
-
-  if (!QueryPerformanceCounter(&counter)) {
-    uv_set_sys_error(GetLastError());
-    return 0;
-  }
-
-  /* Because we have no guarantee about the order of magniture of the */
-  /* performance counter frequency, and there may not be much headroom to */
-  /* multiply by NANOSEC without overflowing, we use 128-bit math instead. */
-  return ((uint64_t) counter.LowPart * NANOSEC / uv_hrtime_frequency_) +
-         (((uint64_t) counter.HighPart * NANOSEC / uv_hrtime_frequency_)
-         << 32);
+int64_t uv_now(uv_loop_t* loop) {
+  return loop->time;
 }
 
 
@@ -111,85 +66,87 @@ static int uv_timer_compare(uv_timer_t* a, uv_timer_t* b) {
 RB_GENERATE_STATIC(uv_timer_tree_s, uv_timer_s, tree_entry, uv_timer_compare);
 
 
-int uv_timer_init(uv_timer_t* handle) {
-  uv_counters()->handle_init++;
-  uv_counters()->timer_init++;
-
-  handle->type = UV_TIMER;
-  handle->flags = 0;
+int uv_timer_init(uv_loop_t* loop, uv_timer_t* handle) {
+  uv__handle_init(loop, (uv_handle_t*) handle, UV_TIMER);
   handle->timer_cb = NULL;
   handle->repeat = 0;
 
-  uv_ref();
+  loop->counters.timer_init++;
 
   return 0;
 }
 
 
-void uv_timer_endgame(uv_timer_t* handle) {
+void uv_timer_endgame(uv_loop_t* loop, uv_timer_t* handle) {
   if (handle->flags & UV_HANDLE_CLOSING) {
     assert(!(handle->flags & UV_HANDLE_CLOSED));
-    handle->flags |= UV_HANDLE_CLOSED;
-
-    if (handle->close_cb) {
-      handle->close_cb((uv_handle_t*)handle);
-    }
-
-    uv_unref();
+    uv__handle_stop(handle);
+    uv__handle_close(handle);
   }
 }
 
 
-int uv_timer_start(uv_timer_t* handle, uv_timer_cb timer_cb, int64_t timeout, int64_t repeat) {
+int uv_timer_start(uv_timer_t* handle, uv_timer_cb timer_cb, int64_t timeout,
+    int64_t repeat) {
+  uv_loop_t* loop = handle->loop;
+  uv_timer_t* old;
+
   if (handle->flags & UV_HANDLE_ACTIVE) {
-    RB_REMOVE(uv_timer_tree_s, &LOOP->timers, handle);
+    RB_REMOVE(uv_timer_tree_s, &loop->timers, handle);
   }
 
   handle->timer_cb = timer_cb;
-  handle->due = LOOP->time + timeout;
+  handle->due = loop->time + timeout;
   handle->repeat = repeat;
   handle->flags |= UV_HANDLE_ACTIVE;
+  uv__handle_start(handle);
 
-  if (RB_INSERT(uv_timer_tree_s, &LOOP->timers, handle) != NULL) {
-    uv_fatal_error(ERROR_INVALID_DATA, "RB_INSERT");
-  }
+  old = RB_INSERT(uv_timer_tree_s, &loop->timers, handle);
+  assert(old == NULL);
 
   return 0;
 }
 
 
 int uv_timer_stop(uv_timer_t* handle) {
+  uv_loop_t* loop = handle->loop;
+
   if (!(handle->flags & UV_HANDLE_ACTIVE))
     return 0;
 
-  RB_REMOVE(uv_timer_tree_s, &LOOP->timers, handle);
+  RB_REMOVE(uv_timer_tree_s, &loop->timers, handle);
 
   handle->flags &= ~UV_HANDLE_ACTIVE;
+  uv__handle_stop(handle);
 
   return 0;
 }
 
 
 int uv_timer_again(uv_timer_t* handle) {
+  uv_loop_t* loop = handle->loop;
+
   /* If timer_cb is NULL that means that the timer was never started. */
   if (!handle->timer_cb) {
-    uv_set_sys_error(ERROR_INVALID_DATA);
+    uv__set_sys_error(loop, ERROR_INVALID_DATA);
     return -1;
   }
 
   if (handle->flags & UV_HANDLE_ACTIVE) {
-    RB_REMOVE(uv_timer_tree_s, &LOOP->timers, handle);
+    RB_REMOVE(uv_timer_tree_s, &loop->timers, handle);
     handle->flags &= ~UV_HANDLE_ACTIVE;
+    uv__handle_stop(handle);
   }
 
   if (handle->repeat) {
-    handle->due = LOOP->time + handle->repeat;
+    handle->due = loop->time + handle->repeat;
 
-    if (RB_INSERT(uv_timer_tree_s, &LOOP->timers, handle) != NULL) {
+    if (RB_INSERT(uv_timer_tree_s, &loop->timers, handle) != NULL) {
       uv_fatal_error(ERROR_INVALID_DATA, "RB_INSERT");
     }
 
     handle->flags |= UV_HANDLE_ACTIVE;
+    uv__handle_start(handle);
   }
 
   return 0;
@@ -208,16 +165,16 @@ int64_t uv_timer_get_repeat(uv_timer_t* handle) {
 }
 
 
-DWORD uv_get_poll_timeout() {
+DWORD uv_get_poll_timeout(uv_loop_t* loop) {
   uv_timer_t* timer;
   int64_t delta;
 
   /* Check if there are any running timers */
-  timer = RB_MIN(uv_timer_tree_s, &LOOP->timers);
+  timer = RB_MIN(uv_timer_tree_s, &loop->timers);
   if (timer) {
-    uv_update_time();
+    uv_update_time(loop);
 
-    delta = timer->due - LOOP->time;
+    delta = timer->due - loop->time;
     if (delta >= UINT_MAX >> 1) {
       /* A timeout value of UINT_MAX means infinite, so that's no good. But */
       /* more importantly, there's always the risk that GetTickCount wraps. */
@@ -240,27 +197,28 @@ DWORD uv_get_poll_timeout() {
 }
 
 
-void uv_process_timers() {
+void uv_process_timers(uv_loop_t* loop) {
   uv_timer_t* timer;
 
   /* Call timer callbacks */
-  for (timer = RB_MIN(uv_timer_tree_s, &LOOP->timers);
-       timer != NULL && timer->due <= LOOP->time;
-       timer = RB_MIN(uv_timer_tree_s, &LOOP->timers)) {
-    RB_REMOVE(uv_timer_tree_s, &LOOP->timers, timer);
+  for (timer = RB_MIN(uv_timer_tree_s, &loop->timers);
+       timer != NULL && timer->due <= loop->time;
+       timer = RB_MIN(uv_timer_tree_s, &loop->timers)) {
+    RB_REMOVE(uv_timer_tree_s, &loop->timers, timer);
 
     if (timer->repeat != 0) {
       /* If it is a repeating timer, reschedule with repeat timeout. */
       timer->due += timer->repeat;
-      if (timer->due < LOOP->time) {
-        timer->due = LOOP->time;
+      if (timer->due < loop->time) {
+        timer->due = loop->time;
       }
-      if (RB_INSERT(uv_timer_tree_s, &LOOP->timers, timer) != NULL) {
+      if (RB_INSERT(uv_timer_tree_s, &loop->timers, timer) != NULL) {
         uv_fatal_error(ERROR_INVALID_DATA, "RB_INSERT");
       }
     } else {
       /* If non-repeating, mark the timer as inactive. */
       timer->flags &= ~UV_HANDLE_ACTIVE;
+      uv__handle_stop(timer);
     }
 
     timer->timer_cb((uv_timer_t*) timer, 0);

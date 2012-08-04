@@ -1,60 +1,47 @@
-## console
+# console
 
-Browser-like object for printing to stdout and stderr.
+    Stability: 4 - API Frozen
 
-### console.log()
+* {Object}
+
+<!--type=global-->
+
+For printing to stdout and stderr.  Similar to the console object functions
+provided by most web browsers, here the output is sent to stdout or stderr.
+
+## console.log([data], [...])
 
 Prints to stdout with newline. This function can take multiple arguments in a
 `printf()`-like way. Example:
 
     console.log('count: %d', count);
 
-The first argument is a string that contains zero or more *placeholders*.
-Each placeholder is replaced with the converted value from its corresponding
-argument. Supported placeholders are:
+If formatting elements are not found in the first string then `util.inspect`
+is used on each argument.  See [util.format()][] for more information.
 
-* `%s` - String.
-* `%d` - Number (both integer and float).
-* `%j` - JSON.
-
-If the placeholder does not have a corresponding argument, `undefined` is used.
-
-    console.log('%s:%s', 'foo'); // 'foo:undefined'
-
-If there are more arguments than placeholders, the extra arguments are
-converted to strings with `util.inspect()` and these strings are concatenated,
-delimited by a space.
-
-    console.log('%s:%s', 'foo', 'bar', 'baz'); // 'foo:bar baz'
-
-If the first argument is not a format string then `console.log()` prints
-a string that is the concatenation of all its arguments separated by spaces.
-Each argument is converted to a string with `util.inspect()`.
-
-    console.log(1, 2, 3); // '1 2 3'
-
-
-### console.info()
+## console.info([data], [...])
 
 Same as `console.log`.
 
-### console.warn()
-### console.error()
+## console.error([data], [...])
 
 Same as `console.log` but prints to stderr.
 
-### console.dir(obj)
+## console.warn([data], [...])
 
-Uses `util.inspect` on `obj` and prints resulting string to stderr.
+Same as `console.error`.
 
-### console.time(label)
+## console.dir(obj)
+
+Uses `util.inspect` on `obj` and prints resulting string to stdout.
+
+## console.time(label)
 
 Mark a time.
 
+## console.timeEnd(label)
 
-### console.timeEnd(label)
-
-Finish timer, record output. Example
+Finish timer, record output. Example:
 
     console.time('100-elements');
     for (var i = 0; i < 100; i++) {
@@ -62,12 +49,14 @@ Finish timer, record output. Example
     }
     console.timeEnd('100-elements');
 
-
-### console.trace()
+## console.trace(label)
 
 Print a stack trace to stderr of the current position.
 
-### console.assert()
+## console.assert(expression, [message])
 
-Same as `assert.ok()`.
+Same as [assert.ok()][] where if the `expression` evaluates as `false` throw an
+AssertionError with `message`.
 
+[assert.ok()]: assert.html#assert_assert_value_message_assert_ok_value_message
+[util.format()]: util.html#util_util_format_format

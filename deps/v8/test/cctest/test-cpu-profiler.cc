@@ -107,7 +107,7 @@ TEST(CodeEvents) {
                             0x80);
   processor.CodeMoveEvent(ToAddress(0x1400), ToAddress(0x1500));
   processor.CodeCreateEvent(i::Logger::STUB_TAG, 3, ToAddress(0x1600), 0x10);
-  processor.CodeDeleteEvent(ToAddress(0x1600));
+  processor.CodeCreateEvent(i::Logger::STUB_TAG, 4, ToAddress(0x1605), 0x10);
   // Enqueue a tick event to enable code events processing.
   EnqueueTickSampleEvent(&processor, ToAddress(0x1000));
 
@@ -216,7 +216,7 @@ TEST(TickEvents) {
 TEST(CrashIfStoppingLastNonExistentProfile) {
   InitializeVM();
   TestSetup test_setup;
-  CpuProfiler::Setup();
+  CpuProfiler::SetUp();
   CpuProfiler::StartProfiling("1");
   CpuProfiler::StopProfiling("2");
   CpuProfiler::StartProfiling("1");
@@ -268,7 +268,7 @@ TEST(Issue1398) {
 TEST(DeleteAllCpuProfiles) {
   InitializeVM();
   TestSetup test_setup;
-  CpuProfiler::Setup();
+  CpuProfiler::SetUp();
   CHECK_EQ(0, CpuProfiler::GetProfilesCount());
   CpuProfiler::DeleteAllProfiles();
   CHECK_EQ(0, CpuProfiler::GetProfilesCount());

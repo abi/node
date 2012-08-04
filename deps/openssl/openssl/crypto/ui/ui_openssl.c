@@ -114,6 +114,7 @@
  * [including the GNU Public Licence.]
  */
 
+#ifndef OPENSSL_NO_TTY
 
 #include <openssl/e_os2.h>
 
@@ -122,7 +123,9 @@
  * sigaction and fileno included. -pedantic would be more appropriate for
  * the intended purposes, but we can't prevent users from adding -ansi.
  */
-#define _POSIX_C_SOURCE 1
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 2
+#endif
 #include <signal.h>
 #include <stdio.h>
 #include <string.h>
@@ -182,7 +185,7 @@
 # undef  SGTTY
 #endif
 
-#if defined(linux) && !defined(TERMIO)
+#if defined(linux) && !defined(TERMIO) && !defined(__ANDROID__)
 # undef  TERMIOS
 # define TERMIO
 # undef  SGTTY
@@ -476,7 +479,7 @@ static int open_console(UI *ui)
 	CRYPTO_w_lock(CRYPTO_LOCK_UI);
 	is_a_tty = 1;
 
-#if defined(OPENSSL_SYS_MACINTOSH_CLASSIC) || defined(OPENSSL_SYS_VXWORKS) || defined(OPENSSL_SYS_NETWARE)
+#if defined(OPENSSL_SYS_MACINTOSH_CLASSIC) || defined(OPENSSL_SYS_VXWORKS) || defined(OPENSSL_SYS_NETWARE) || defined(OPENSSL_SYS_BEOS)
 	tty_in=stdin;
 	tty_out=stderr;
 #else
@@ -707,4 +710,6 @@ static int noecho_fgets(char *buf, int size, FILE *tty)
 #endif
 	return(strlen(buf));
 	}
+#endif
+
 #endif

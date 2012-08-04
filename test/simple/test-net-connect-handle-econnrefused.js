@@ -19,7 +19,7 @@
 // OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE
 // USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-// libuv-broken
+
 
 
 var common = require('../common');
@@ -39,7 +39,6 @@ var gotError = false;
 c.on('error', function(e) {
   console.error('couldn\'t connect.');
   gotError = true;
-  assert.equal(require('constants').ECONNREFUSED, e.errno);
   assert.equal('ECONNREFUSED', e.code);
 });
 

@@ -22,39 +22,31 @@
 #include <assert.h>
 
 #include "uv.h"
-#include "../uv-common.h"
 #include "internal.h"
+#include "handle-inl.h"
 
 
-void uv_loop_watcher_endgame(uv_handle_t* handle) {
+void uv_loop_watcher_endgame(uv_loop_t* loop, uv_handle_t* handle) {
   if (handle->flags & UV_HANDLE_CLOSING) {
     assert(!(handle->flags & UV_HANDLE_CLOSED));
     handle->flags |= UV_HANDLE_CLOSED;
-
-    if (handle->close_cb) {
-      handle->close_cb(handle);
-    }
-
-    uv_unref();
+    uv__handle_stop(handle);
+    uv__handle_close(handle);
   }
 }
 
 
 #define UV_LOOP_WATCHER_DEFINE(name, NAME)                                    \
-  int uv_##name##_init(uv_##name##_t* handle) {                               \
-    handle->type = UV_##NAME;                                                 \
-    handle->flags = 0;                                                        \
-                                                                              \
-    uv_ref();                                                                 \
-                                                                              \
-    uv_counters()->handle_init++;                                             \
-    uv_counters()->prepare_init++;                                            \
+  int uv_##name##_init(uv_loop_t* loop, uv_##name##_t* handle) {              \
+    uv__handle_init(loop, (uv_handle_t*) handle, UV_##NAME);                  \
+    loop->counters.name##_init++;                                             \
                                                                               \
     return 0;                                                                 \
   }                                                                           \
                                                                               \
                                                                               \
   int uv_##name##_start(uv_##name##_t* handle, uv_##name##_cb cb) {           \
+    uv_loop_t* loop = handle->loop;                                           \
     uv_##name##_t* old_head;                                                  \
                                                                               \
     assert(handle->type == UV_##NAME);                                        \
@@ -62,7 +54,7 @@ void uv_loop_watcher_endgame(uv_handle_t* handle) {
     if (handle->flags & UV_HANDLE_ACTIVE)                                     \
       return 0;                                                               \
                                                                               \
-    old_head = LOOP->name##_handles;                                          \
+    old_head = loop->name##_handles;                                          \
                                                                               \
     handle->name##_next = old_head;                                           \
     handle->name##_prev = NULL;                                               \
@@ -71,29 +63,32 @@ void uv_loop_watcher_endgame(uv_handle_t* handle) {
       old_head->name##_prev = handle;                                         \
     }                                                                         \
                                                                               \
-    LOOP->name##_handles = handle;                                            \
+    loop->name##_handles = handle;                                            \
                                                                               \
     handle->name##_cb = cb;                                                   \
     handle->flags |= UV_HANDLE_ACTIVE;                                        \
+    uv__handle_start(handle);                                                 \
                                                                               \
     return 0;                                                                 \
   }                                                                           \
                                                                               \
                                                                               \
   int uv_##name##_stop(uv_##name##_t* handle) {                               \
+    uv_loop_t* loop = handle->loop;                                           \
+                                                                              \
     assert(handle->type == UV_##NAME);                                        \
                                                                               \
     if (!(handle->flags & UV_HANDLE_ACTIVE))                                  \
       return 0;                                                               \
                                                                               \
     /* Update loop head if needed */                                          \
-    if (LOOP->name##_handles == handle) {                                     \
-      LOOP->name##_handles = handle->name##_next;                             \
+    if (loop->name##_handles == handle) {                                     \
+      loop->name##_handles = handle->name##_next;                             \
     }                                                                         \
                                                                               \
     /* Update the iterator-next pointer of needed */                          \
-    if (LOOP->next_##name##_handle == handle) {                               \
-      LOOP->next_##name##_handle = handle->name##_next;                       \
+    if (loop->next_##name##_handle == handle) {                               \
+      loop->next_##name##_handle = handle->name##_next;                       \
     }                                                                         \
                                                                               \
     if (handle->name##_prev) {                                                \
@@ -104,19 +99,20 @@ void uv_loop_watcher_endgame(uv_handle_t* handle) {
     }                                                                         \
                                                                               \
     handle->flags &= ~UV_HANDLE_ACTIVE;                                       \
+    uv__handle_stop(handle);                                                  \
                                                                               \
     return 0;                                                                 \
   }                                                                           \
                                                                               \
                                                                               \
-  void uv_##name##_invoke() {                                                 \
+  void uv_##name##_invoke(uv_loop_t* loop) {                                  \
     uv_##name##_t* handle;                                                    \
                                                                               \
-    LOOP->next_##name##_handle = LOOP->name##_handles;                        \
+    (loop)->next_##name##_handle = (loop)->name##_handles;                    \
                                                                               \
-    while (LOOP->next_##name##_handle != NULL) {                              \
-      handle = LOOP->next_##name##_handle;                                    \
-      LOOP->next_##name##_handle = handle->name##_next;                       \
+    while ((loop)->next_##name##_handle != NULL) {                            \
+      handle = (loop)->next_##name##_handle;                                  \
+      (loop)->next_##name##_handle = handle->name##_next;                     \
                                                                               \
       handle->name##_cb(handle, 0);                                           \
     }                                                                         \
