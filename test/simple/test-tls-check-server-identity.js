@@ -31,8 +31,21 @@ var tests = [
   { host: 'a.com', cert: { subject: { CN: 'b.com' } }, result: false },
   { host: 'a.com', cert: { subject: { CN: 'a.com.' } }, result: true },
 
-  // No wildcards in CN
-  { host: 'b.a.com', cert: { subject: { CN: '*.a.com' } }, result: false },
+  // Wildcards in CN
+  { host: 'b.a.com', cert: { subject: { CN: '*.a.com' } }, result: true },
+  { host: 'b.a.com', cert: {
+    subjectaltname: 'DNS:omg.com',
+    subject: { CN: '*.a.com' } },
+    result: false
+  },
+
+  // Multiple CN fields
+  {
+    host: 'foo.com', cert: {
+      subject: { CN: ['foo.com', 'bar.com'] } // CN=foo.com; CN=bar.com;
+    },
+    result: true
+  },
 
   // DNS names and CN
   {
@@ -61,7 +74,7 @@ var tests = [
       subjectaltname: 'DNS:*.a.com',
       subject: { CN: 'a.com' }
     },
-    result: true
+    result: false
   },
   {
     host: 'a.com', cert: {
@@ -185,7 +198,7 @@ var tests = [
       subjectaltname: 'DNS:a.com',
       subject: { CN: 'localhost' }
     },
-    result: true
+    result: false
   },
 ];
 

@@ -7,14 +7,13 @@ var cbCalled = false
   , rm = require("rimraf")
   , itWorked = false
   , path = require("path")
-  , ini = require("./ini.js")
   , wroteLogFile = false
   , exitCode = 0
 
 
 process.on("exit", function (code) {
   // console.error("exit", code)
-  if (!ini.resolved) return
+  if (!npm.config.loaded) return
   if (code) itWorked = false
   if (itWorked) log.info("ok")
   else {
@@ -71,7 +70,7 @@ function exit (code, noLog) {
 function errorHandler (er) {
   var printStack = false
   // console.error("errorHandler", er)
-  if (!ini.resolved) {
+  if (!npm.config.loaded) {
     // logging won't work unless we pretend that it's ready
     er = er || new Error("Exit prior to config file resolving.")
     console.error(er.stack || er.message)
@@ -125,6 +124,15 @@ function errorHandler (er) {
               ].join("\n"))
     break
 
+  case "ENOGIT":
+    er.code = "ENOGIT"
+    log.error("", er.message)
+    log.error("", ["","Failed using git."
+              ,"This is most likely not a problem with npm itself."
+              ,"Please check if you have git installed and in your PATH."
+              ].join("\n"))
+    break
+
   case "EJSONPARSE":
     er.code = "EJSONPARSE"
     log.error("", er.message)
@@ -157,9 +165,13 @@ function errorHandler (er) {
   case "EPUBLISHCONFLICT":
     er.code = "EPUBLISHCONFLICT"
     log.error("publish fail", ["Cannot publish over existing version."
-              ,"Bump the 'version' field, set the --force flag, or"
-              ,"    npm unpublish '"+er.pkgid+"'"
-              ,"and try again"
+              ,"Update the 'version' field in package.json and try again."
+              ,""
+              ,"If the previous version was published in error, see:"
+              ,"    npm help unpublish"
+              ,""
+              ,"To automatically increment version numbers, see:"
+              ,"    npm help version"
               ].join("\n"))
     break
 
@@ -196,6 +208,30 @@ function errorHandler (er) {
     log.error([er.message
               ,"File exists: "+er.path
               ,"Move it away, and try again."].join("\n"))
+    break
+
+  case "ENEEDAUTH":
+    log.error("need auth", [er.message
+              ,"You need to authorize this machine using `npm adduser`"
+              ].join("\n"))
+    break
+
+  case "EPEERINVALID":
+    var peerErrors = Object.keys(er.peersDepending).map(function (peer) {
+      return "Peer " + peer + " wants " + er.packageName + "@"
+        + er.peersDepending[peer]
+    })
+    log.error("peerinvalid", [er.message].concat(peerErrors).join("\n"))
+    break
+
+  case "ENOTFOUND":
+    log.error("network", [er.message
+              ,"This is most likely not a problem with npm itself"
+              ,"and is related to network connectivity."
+              ,"In most cases you are behind a proxy or have bad network settings."
+              ,"\nIf you are behind a proxy, please make sure that the"
+              ,"'proxy' config is set properly.  See: 'npm help config'"
+              ].join("\n"))
     break
 
   case "ENOTSUP":
@@ -268,7 +304,7 @@ function writeLogFile (cb) {
   var fs = require("graceful-fs")
     , fstr = fs.createWriteStream("npm-debug.log")
     , util = require("util")
-    , eol = process.platform === "win32" ? "\r\n" : "\n"
+    , os = require("os")
     , out = ""
 
   log.record.forEach(function (m) {
@@ -279,7 +315,7 @@ function writeLogFile (cb) {
     m.message.trim().split(/\r?\n/).map(function (line) {
       return (pref + ' ' + line).trim()
     }).forEach(function (line) {
-      out += line + eol
+      out += line + os.EOL
     })
   })
 

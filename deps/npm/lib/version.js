@@ -2,12 +2,13 @@
 
 module.exports = version
 
-var exec = require("./utils/exec.js")
+var exec = require("child_process").execFile
   , semver = require("semver")
   , path = require("path")
   , fs = require("graceful-fs")
   , chain = require("slide").chain
   , log = require("npmlog")
+  , which = require("which")
   , npm = require("./npm.js")
 
 version.usage = "npm version [<newversion> | major | minor | patch | build]\n"
@@ -20,8 +21,26 @@ version.usage = "npm version [<newversion> | major | minor | patch | build]\n"
 
 function version (args, silent, cb_) {
   if (typeof cb_ !== "function") cb_ = silent, silent = false
-  if (args.length !== 1) return cb_(version.usage)
+  if (args.length > 1) return cb_(version.usage)
   fs.readFile(path.join(process.cwd(), "package.json"), function (er, data) {
+    if (!args.length) {
+      var v = {}
+      Object.keys(process.versions).forEach(function (k) {
+        v[k] = process.versions[k]
+      })
+      v.npm = npm.version
+      try {
+        data = JSON.parse(data.toString())
+      } catch (er) {
+        data = null
+      }
+      if (data && data.name && data.version) {
+        v[data.name] = data.version
+      }
+      console.log(v)
+      return cb_()
+    }
+
     if (er) {
       log.error("version", "No package.json found")
       return cb_(er)
@@ -54,30 +73,43 @@ function version (args, silent, cb_) {
 }
 
 function checkGit (data, cb) {
-  exec( npm.config.get("git"), ["status", "--porcelain"], process.env, false
-      , function (er, code, stdout, stderr) {
-    var lines = stdout.trim().split("\n").filter(function (line) {
-      return line.trim() && !line.match(/^\?\? /)
-    }).map(function (line) {
-      return line.trim()
-    })
-    if (lines.length) return cb(new Error(
-      "Git working directory not clean.\n"+lines.join("\n")))
-    write(data, function (er) {
-      if (er) return cb(er)
-      var message = npm.config.get("message").replace(/%s/g, data.version)
-        , sign = npm.config.get("sign-git-tag")
-        , flag = sign ? "-sm" : "-am"
-      chain
-        ( [ [ exec, npm.config.get("git")
-            , ["add","package.json"], process.env, false ]
-          , [ exec, npm.config.get("git")
-            , ["commit", "-m", message ], process.env, false ]
-          , [ exec, npm.config.get("git")
-            , ["tag", "v"+data.version, flag, message], process.env, false ] ]
-        , cb )
-    })
+  var git = npm.config.get("git")
+  var args = [ "status", "--porcelain" ]
+  var env = process.env
+
+  // check for git
+  which(git, function (err) {
+    if (err) {
+      err.code = "ENOGIT"
+      return cb(err)
+    }
+
+    gitFound()
   })
+
+  function gitFound () {
+    exec(git, args, {env: env}, function (er, stdout, stderr) {
+      var lines = stdout.trim().split("\n").filter(function (line) {
+        return line.trim() && !line.match(/^\?\? /)
+      }).map(function (line) {
+        return line.trim()
+      })
+      if (lines.length) return cb(new Error(
+        "Git working directory not clean.\n"+lines.join("\n")))
+      write(data, function (er) {
+        if (er) return cb(er)
+        var message = npm.config.get("message").replace(/%s/g, data.version)
+          , sign = npm.config.get("sign-git-tag")
+          , flag = sign ? "-sm" : "-am"
+        chain
+          ( [ [ exec, git, [ "add", "package.json" ], {env: process.env} ]
+            , [ exec, git, [ "commit", "-m", message ], {env: process.env} ]
+            , [ exec, git, [ "tag", "v" + data.version, flag, message ]
+              , {env: process.env} ] ]
+          , cb )
+      })
+    })
+  }
 }
 
 function write (data, cb) {
